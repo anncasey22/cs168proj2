@@ -79,8 +79,7 @@ class DVRouter(DVRouterBase):
 
         ##### Begin Stage 1 #####
         lat = self.ports.get_latency(port)
-        self.table[host] = TableEntry(host, port,lat, FOREVER)
-        self.send_routes(force=False)
+        self.table[host] = TableEntry(host, port, lat, FOREVER)
         ##### End Stage 1 #####
 
     def handle_data_packet(self, packet, in_port):
@@ -112,6 +111,11 @@ class DVRouter(DVRouterBase):
         self.send(packet,port=next_hop)
 
         ##### End Stage 2 #####
+
+    def _clear_history_for_dst(self, dst):
+        for p in self.history:
+            if dst in self.history[p]:
+                self.history[p].pop(dst)
 
     def send_routes(self, force=False, single_port=None):
         """
@@ -158,7 +162,7 @@ class DVRouter(DVRouterBase):
         """
         ##### Begin Stages 5, 9 #####
         expired_destinations = [
-            dst for dst, entry in self.table.items() if entry.has_expired
+        dst for dst, entry in self.table.items() if entry.has_expired
         ]
         for dst in expired_destinations:
             self.s_log(f"Route to {dst} timed out.")
@@ -172,8 +176,7 @@ class DVRouter(DVRouterBase):
                 )
             else:
                 self.table.pop(dst)
-        if expired_destinations:
-            self.send_routes(force=False)
+                self._clear_history_for_dst(dst)
 
         ##### End Stages 5, 9 #####
 
@@ -189,24 +192,21 @@ class DVRouter(DVRouterBase):
         
         ##### Begin Stages 4, 10 #####
         link_cost = self.ports.get_latency(port)
-        path_latency = min(route_latency + link_cost, INFINITY) # Stage 8/10 cap
+        path_latency = min(route_latency + link_cost, INFINITY)
         
         existing_entry = self.table.get(route_dst)
         should_update_table = False
-        changed_for_neighbors = False # This is the Stage 10 trigger
+        changed_for_neighbors = False
 
         if existing_entry is None:
             if path_latency < INFINITY:
                 should_update_table = True
                 changed_for_neighbors = True
         elif port == existing_entry.port:
-            # Rule 2: Always update table to refresh timeout
             should_update_table = True
-            # Stage 10: Only trigger neighbors if the cost actually shifted
             if path_latency != existing_entry.latency:
                 changed_for_neighbors = True
         elif path_latency < existing_entry.latency:
-            # Rule 1: Strictly better path
             should_update_table = True
             changed_for_neighbors = True
 
@@ -218,7 +218,6 @@ class DVRouter(DVRouterBase):
                 expire_time=api.current_time() + self.ROUTE_TTL
             )
 
-        # Triggered Update: Tell neighbors NOW if the path changed
         if changed_for_neighbors:
             self.send_routes(force=False)
 
@@ -264,6 +263,7 @@ class DVRouter(DVRouterBase):
                 )
             else:
                 self.table.pop(dst)
+                self._clear_history_for_dst(dst)
 
         if affected_destinations:
             self.send_routes(force=False)
