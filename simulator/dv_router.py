@@ -145,8 +145,8 @@ class DVRouter(DVRouterBase):
                 else:
                     advertised_latency = min(route_entry.latency, INFINITY)
 
-                previous_announcement = self.history[outbound_port].get(destination)
-                if not force and previous_announcement == advertised_latency:
+                past_announc = self.history[outbound_port].get(destination)
+                if not force and past_announc == advertised_latency:
                     continue
 
                 self.send_route(outbound_port, destination, advertised_latency)
@@ -195,22 +195,22 @@ class DVRouter(DVRouterBase):
         path_latency = min(route_latency + link_cost, INFINITY)
         
         existing_entry = self.table.get(route_dst)
-        should_update_table = False
-        changed_for_neighbors = False
+        update_table = False
+        did_change = False
 
         if existing_entry is None:
             if path_latency < INFINITY:
-                should_update_table = True
-                changed_for_neighbors = True
+                update_table = True
+                did_change = True
         elif port == existing_entry.port:
-            should_update_table = True
+            update_table = True
             if path_latency != existing_entry.latency:
-                changed_for_neighbors = True
+                did_change = True
         elif path_latency < existing_entry.latency:
-            should_update_table = True
-            changed_for_neighbors = True
+            update_table = True
+            did_change = True
 
-        if should_update_table:
+        if update_table:
             self.table[route_dst] = TableEntry(
                 dst=route_dst,
                 port=port,
@@ -218,7 +218,7 @@ class DVRouter(DVRouterBase):
                 expire_time=api.current_time() + self.ROUTE_TTL
             )
 
-        if changed_for_neighbors:
+        if did_change:
             self.send_routes(force=False)
 
     def handle_link_up(self, port, latency):
@@ -249,11 +249,11 @@ class DVRouter(DVRouterBase):
         if port in self.history:
             self.history.pop(port)
 
-        affected_destinations = [
+        destinations_in_path = [
             dst for dst, entry in self.table.items() if entry.port == port
         ]
 
-        for dst in affected_destinations:
+        for dst in destinations_in_path:
             if self.POISON_ON_LINK_DOWN:
                 self.table[dst] = TableEntry(
                     dst=dst,
@@ -265,7 +265,7 @@ class DVRouter(DVRouterBase):
                 self.table.pop(dst)
                 self._clear_history_for_dst(dst)
 
-        if affected_destinations:
+        if destinations_in_path:
             self.send_routes(force=False)
         ##### End Stage 10B #####
 
